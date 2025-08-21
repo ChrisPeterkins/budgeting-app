@@ -1,0 +1,276 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum FileStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum AccountType {
+  CHECKING
+  SAVINGS
+  CREDIT_CARD
+  CREDIT
+  INVESTMENT
+  LOAN
+}
+
+enum GoalType {
+  SAVINGS
+  DEBT_PAYOFF
+  EXPENSE
+  INCOME
+  INVESTMENT
+  EMERGENCY_FUND
+}
+
+enum BudgetPeriod {
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+model User {
+  id               String            @id @default(cuid())
+  email            String            @unique
+  name             String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  accounts         Account[]
+  budgets          Budget[]
+  goals            Goal[]
+  learningPatterns LearningPattern[]
+  statements       Statement[]
+  transactions     Transaction[]
+
+  @@map("users")
+}
+
+model Account {
+  id                    String                    @id @default(cuid())
+  userId                String
+  name                  String
+  type                  AccountType
+  institution           String?
+  lastFour              String?
+  isActive              Boolean                   @default(true)
+  createdAt             DateTime                  @default(now())
+  balance               Float                     @default(0)
+  user                  User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  statements            StatementAccountSection[]
+  transactions          Transaction[]
+  uploadedFiles         UploadedFile[]
+
+  @@map("accounts")
+}
+
+model Statement {
+  id               String                    @id @default(cuid())
+  userId           String
+  uploadedFileId   String?
+  statementDate    DateTime
+  periodStartDate  DateTime
+  periodEndDate    DateTime
+  statementType    String                    @default("MONTHLY")
+  isReconciled     Boolean                   @default(false)
+  notes            String?
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+  
+  // Multi-account support
+  accountSections  StatementAccountSection[]
+  uploadedFile     UploadedFile?             @relation(fields: [uploadedFileId], references: [id])
+  user             User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, statementDate])
+  @@map("statements")
+}
+
+model StatementAccountSection {
+  id               String        @id @default(cuid())
+  statementId      String
+  accountId        String?       // Optional if account doesn't exist yet
+  accountName      String?       // Account name from statement
+  accountNumber    String?       // Account number/identifier from statement  
+  lastFour         String?       // Last 4 digits for matching
+  beginningBalance Float?
+  endingBalance    Float?
+  totalDebits      Float?
+  totalCredits     Float?
+  transactionCount Int?
+  createdAt        DateTime      @default(now())
+  
+  statement        Statement     @relation(fields: [statementId], references: [id], onDelete: Cascade)
+  account          Account?      @relation(fields: [accountId], references: [id])
+  
+  @@index([statementId])
+  @@index([accountId])
+  @@map("statement_account_sections")
+}
+
+model Transaction {
+  id                    String                @id @default(cuid())
+  accountId             String
+  userId                String
+  date                  DateTime
+  amount                Float
+  description           String
+  categoryId            String?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  transactionCategories TransactionCategory[]
+  category              Category?             @relation(fields: [categoryId], references: [id])
+  user                  User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account               Account               @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, date])
+  @@index([userId, date])
+  @@index([categoryId])
+  @@map("transactions")
+}
+
+model TransactionCategory {
+  id            String      @id @default(cuid())
+  transactionId String
+  categoryId    String
+  createdAt     DateTime    @default(now())
+  category      Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@unique([transactionId, categoryId])
+  @@map("transaction_categories")
+}
+
+model CategorizationRule {
+  id         String   @id @default(cuid())
+  name       String
+  pattern    String
+  categoryId String
+  confidence Float    @default(0.8)
+  isActive   Boolean  @default(true)
+  priority   Int      @default(1)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  category   Category @relation(fields: [categoryId], references: [id])
+
+  @@map("categorization_rules")
+}
+
+model LearningPattern {
+  id         String   @id @default(cuid())
+  userId     String
+  pattern    String
+  categoryId String
+  confidence Float    @default(1.0)
+  matchCount Int      @default(1)
+  lastUsed   DateTime @default(now())
+  createdAt  DateTime @default(now())
+  category   Category @relation(fields: [categoryId], references: [id])
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, pattern, categoryId])
+  @@map("learning_patterns")
+}
+
+model Category {
+  id                    String                @id @default(cuid())
+  name                  String                @unique
+  icon                  String?
+  color                 String?
+  parentId              String?
+  isSystem              Boolean               @default(false)
+  budgetItems           BudgetItem[]
+  parent                Category?             @relation("CategoryParent", fields: [parentId], references: [id])
+  children              Category[]            @relation("CategoryParent")
+  categorizationRules   CategorizationRule[]
+  learningPatterns      LearningPattern[]
+  transactionCategories TransactionCategory[]
+  transactions          Transaction[]
+
+  @@map("categories")
+}
+
+model Budget {
+  id        String       @id @default(cuid())
+  userId    String
+  name      String
+  period    BudgetPeriod
+  startDate DateTime
+  endDate   DateTime
+  isActive  Boolean      @default(true)
+  createdAt DateTime     @default(now())
+  items     BudgetItem[]
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("budgets")
+}
+
+model BudgetItem {
+  id         String   @id @default(cuid())
+  budgetId   String
+  categoryId String
+  amount     Float
+  type       String   @default("EXPENSE")
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  budget     Budget   @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+
+  @@unique([budgetId, categoryId])
+  @@map("budget_items")
+}
+
+model Goal {
+  id            String   @id @default(cuid())
+  userId        String
+  name          String
+  type          GoalType
+  targetAmount  Float
+  currentAmount Float    @default(0)
+  targetDate    DateTime
+  isCompleted   Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("goals")
+}
+
+model UploadedFile {
+  id                String      @id @default(cuid())
+  filename          String
+  originalName      String
+  filePath          String
+  fileSize          Int
+  status            FileStatus  @default(PENDING)
+  accountId         String?
+  bankName          String?
+  accountType       AccountType @default(CHECKING)
+  statementType     String      @default("MONTHLY")
+  processedAt       DateTime?
+  errorMessage      String?
+  transactionCount  Int?
+  processingDetails String?
+  createdAt         DateTime    @default(now())
+  periodEndDate     DateTime?
+  periodStartDate   DateTime?
+  statementDate     DateTime?
+  statements        Statement[]
+  account           Account?    @relation(fields: [accountId], references: [id])
+
+  @@map("uploaded_files")
+}
+
+model AppSetting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String
+
+  @@map("app_settings")
+}
